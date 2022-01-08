@@ -1,0 +1,108 @@
+
+#Created function to optimize Alpha and Lambda in Elastic Net 
+
+#Step 1: Create tune_glm function
+tune_glm = function(dataset){
+  
+  #Creating lists to store results
+  final_mse = list()
+  
+  #Randomly shuffle the data
+  set.seed(489565)
+  yourData<-dataset[sample(nrow(dataset)),]
+  
+  #Create 10 equally size folds
+  folds <- cut(seq(1,nrow(dataset)),breaks=10,labels=FALSE)
+  
+  #Perform 10 fold cross validation
+  for(i in 1:10){
+    
+    #Defining list to store mse values for different alphas
+    alpha_mse = list()
+    
+    #Segment data by fold using the which() function 
+    testIndexes <- which(folds==i,arr.ind=TRUE)
+    testData <- yourData[testIndexes, ]
+    trainData <- yourData[-testIndexes, ]
+    
+    #Splitting into train and test, and between x and y for input into model
+    x_train = model.matrix(Sale_Price ~ ., trainData)
+    y_train = trainData[,"Sale_Price"]
+    x_test = model.matrix(Sale_Price ~ ., testData)
+    y_test = testData[,"Sale_Price"]
+    
+    #For loop for both defining a grid for both alpha and lambda values
+    for (j in seq(0,1,by=0.05)){
+      lambda_mse = list() #Creating list to store error values for lambda loop
+      for (l in 0:30){
+        set.seed(489565)
+        
+        #Iterating elastic net model with different levels of alpha and lambda
+        elnet = glmnet(x_train, y_train, alpha=j, lambda = l)
+        lambda = elnet$lambda.min
+        predictions <- elnet %>% predict(x_test, s=lambda)
+        lambda_mse[[length(lambda_mse)+1]] = (mean((predictions-y_test)^2))
+      }
+      
+      #Converting stored list with error values from lambdas into dataframe
+      perf <- data.frame(matrix(unlist(lambda_mse), nrow=length(lambda_mse), 
+                                byrow=T)) #unlist
+      perf$lambda = seq(0,30,by=1)
+      
+      #Populating list with min error measure at each lambda iteration
+      alpha_mse[[length(alpha_mse)+1]] = 
+        perf[which.min(perf$matrix.unlist.lambda_mse...nrow...length.lambda_mse...byrow...T.),]
+    }
+    
+    #Creating dataframe with min error measure at each alpha iteration
+    perf <- data.frame(matrix(unlist(alpha_mse), nrow=length(alpha_mse), byrow=T)) #unlist
+    perf$alpha = seq(0,1,by=0.05)
+    setnames(perf, old = c('X1','X2'), new = c('MSE','Lambda'))
+    
+    #At each iteration of cross validation, storing min error 
+    #value of alpha iterations
+    final_mse[[length(final_mse)+1]] = perf[which.min(perf$MSE),]
+  }
+  
+  #Un-listing cross validation performance and storing hyperparameter values 
+  #of best model based on lowest mse value
+  mse = final_mse
+  temp = data.frame(matrix(unlist(mse), nrow=length(mse), byrow=T))
+  setnames(temp, old = c('X1','X2','X3'), new = c('MSE','Lambda','Alpha'))
+  temp = as.data.frame(sapply(temp,FUN=mean))
+  temp = transpose(temp)
+  setnames(temp, old = c('V1','V2','V3'), new = c('MSE','Lambda','Alpha'))
+  
+  #Running model with optimized hyperparameters
+  opt_model = glmnet(x_train, y_train, alpha = temp$Alpha, lambda = temp$Lambda)
+  opt_model[["call"]][["alpha"]][[3]] = temp$Alpha
+  opt_model
+}
+
+
+#Step 2: Calling function and evaluation
+
+#Calling created function (tune_glm) to tune alpha and lambda for data
+elnet_own = tune_glm(data)
+
+#Minimum lambda
+lambda = elnet_own[["lambda"]]
+
+#Optimal Alpha
+alpha = elnet_own[["call"]][["alpha"]][[3]]
+
+#Concatenating min alpha and lambda for results table after
+opt_hyp = cbind(lambda,alpha)
+
+#Computing performance on test set
+predictions <- elnet_own %>% predict(x_test, s="lambda.min")
+
+mperf_elastic_custom = data.frame(
+  Model = "Created Elastic Net",
+  MSE = (mean((predictions-data$Y)^2)),
+  MAE= MAE(predictions, data$Y),
+  MSE_1se = paste("", sep = ""),
+  MAE_1se = paste("", sep = ""))
+
+#Concatenating with optimal hyperparameters
+store_elastic_cust = cbind(mperf_elastic_custom, opt_hyp)
